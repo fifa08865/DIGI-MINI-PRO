@@ -155,6 +155,23 @@
             </div>
         </section>
 
+        <!-- No Banana Detected Section -->
+        <section class="no-banana-section hidden" id="noBananaSection">
+            <div class="results-card glass-card" style="text-align: center; padding: 48px 24px;">
+                <div style="font-size: 72px; margin-bottom: 16px;">🚫🍌</div>
+                <h2 style="color: #ff6b6b; font-family: 'Prompt', sans-serif; font-weight: 700; font-size: 1.5rem; margin-bottom: 12px;">ไม่พบกล้วยในรูปภาพ</h2>
+                <p style="color: rgba(255,255,255,0.7); font-family: 'Prompt', sans-serif; font-size: 0.95rem; margin-bottom: 8px;">ระบบไม่สามารถตรวจพบกล้วยในรูปที่อัพโหลด</p>
+                <p style="color: rgba(255,255,255,0.5); font-family: 'Prompt', sans-serif; font-size: 0.85rem; margin-bottom: 32px;">กรุณาอัพโหลดรูปภาพที่มีกล้วยอยู่ในรูปเพื่อวิเคราะห์ความสุก</p>
+                <button class="btn btn-primary btn-try-again" onclick="resetAll()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10" />
+                        <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+                    </svg>
+                    ลองอีกครั้ง
+                </button>
+            </div>
+        </section>
+
         <!-- Results Section -->
         <section class="results-section hidden" id="resultsSection">
             <div class="results-card glass-card">

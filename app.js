@@ -195,7 +195,13 @@ function analyzeImage() {
 
         setTimeout(() => {
             document.getElementById('loadingSection').classList.add('hidden');
-            displayResults(result, previewImage.src);
+            // Check if banana was actually detected (threshold: 10% banana pixels)
+            if (result.bananaPixelRatio < 10) {
+                document.getElementById('noBananaSection').classList.remove('hidden');
+                document.getElementById('noBananaSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                displayResults(result, previewImage.src);
+            }
         }, 500);
     };
     img.src = previewImage.src;
@@ -560,6 +566,7 @@ function resetAll() {
     document.getElementById('previewSection').classList.add('hidden');
     document.getElementById('resultsSection').classList.add('hidden');
     document.getElementById('loadingSection').classList.add('hidden');
+    document.getElementById('noBananaSection').classList.add('hidden');
 
     document.getElementById('previewImage').src = '';
     document.getElementById('fileInput').value = '';
