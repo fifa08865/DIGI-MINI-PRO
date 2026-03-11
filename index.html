@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍌 ตรวจจับความสุกของกล้วย | Banana Ripeness Detector</title>
+    <meta name="description"
+        content="เว็บแอปตรวจจับความสุกของกล้วยจากรูปภาพ ใช้การวิเคราะห์สีอัจฉริยะ รองรับอัพโหลดรูปและถ่ายจากกล้อง">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Animated Background Particles -->
+    <div class="bg-particles" id="bgParticles"></div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <span class="logo-emoji">🍌</span>
+                <div class="logo-text">
+                    <h1>Banana Ripeness</h1>
+                    <p class="logo-subtitle">ตรวจจับความสุกของกล้วย</p>
+                </div>
+            </div>
+            <div class="header-badge">
+                <span class="badge-dot"></span>
+                AI Powered
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Hero Section -->
+        <section class="hero-section">
+            <div class="hero-banner"
+                style="background: linear-gradient(135deg, #0d3b1e 0%, #1a5c2e 20%, #4d7a28 40%, #8ca622 55%, #c4b717 70%, #e0a910 85%, #d4850c 100%); height: 200px; display: flex; align-items: center; justify-content: center;">
+                <span style="font-size: 80px; filter: drop-shadow(0 4px 20px rgba(0,0,0,0.4));">🍌</span>
+            </div>
+            <h2 class="hero-title">วิเคราะห์ความสุกของกล้วย<br><span class="gradient-text">ด้วย YOLOv8n-cls</span></h2>
+            <p class="hero-description">อัพโหลดรูปภาพหรือถ่ายจากกล้อง เพื่อตรวจสอบว่ากล้วยของคุณสุกแล้วหรือยัง</p>
+        </section>
+
+        <!-- Upload Section -->
+        <section class="upload-section" id="uploadSection">
+            <div class="upload-card glass-card">
+                <div class="upload-tabs">
+                    <button class="tab-btn active" id="tabUpload" onclick="switchTab('upload')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                            <polyline points="17 8 12 3 7 8" />
+                            <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                        อัพโหลดรูป
+                    </button>
+                    <button class="tab-btn" id="tabCamera" onclick="switchTab('camera')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                            <circle cx="12" cy="13" r="4" />
+                        </svg>
+                        ถ่ายจากกล้อง
+                    </button>
+                </div>
+
+                <!-- Upload Tab Content -->
+                <div class="tab-content active" id="uploadContent">
+                    <div class="dropzone" id="dropzone">
+                        <div class="dropzone-icon">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                        </div>
+                        <p class="dropzone-text">ลากไฟล์มาวางที่นี่</p>
+                        <p class="dropzone-subtext">หรือ คลิกเพื่อเลือกไฟล์</p>
+                        <p class="dropzone-formats">รองรับ JPG, PNG, WEBP</p>
+                        <input type="file" id="fileInput" accept="image/*" hidden>
+                    </div>
+                </div>
+
+                <!-- Camera Tab Content -->
+                <div class="tab-content" id="cameraContent">
+                    <div class="camera-container">
+                        <video id="cameraVideo" autoplay playsinline></video>
+                        <div class="camera-overlay">
+                            <div class="camera-frame"></div>
+                        </div>
+                        <div class="camera-controls">
+                            <button class="btn btn-capture" id="captureBtn" onclick="capturePhoto()">
+                                <div class="capture-ring"></div>
+                            </button>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary btn-start-camera" id="startCameraBtn" onclick="startCamera()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                            <circle cx="12" cy="13" r="4" />
+                        </svg>
+                        เปิดกล้อง
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Preview Section -->
+        <section class="preview-section hidden" id="previewSection">
+            <div class="preview-card glass-card">
+                <div class="preview-header">
+                    <h3>รูปภาพที่เลือก</h3>
+                    <button class="btn btn-ghost" onclick="resetAll()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="1 4 1 10 7 10" />
+                            <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+                        </svg>
+                        เลือกรูปใหม่
+                    </button>
+                </div>
+                <div class="preview-image-container">
+                    <img id="previewImage" alt="Preview">
+                    <canvas id="analysisCanvas" hidden></canvas>
+                </div>
+                <button class="btn btn-primary btn-analyze" id="analyzeBtn" onclick="analyzeImage()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    วิเคราะห์ความสุกของกล้วย
+                </button>
+            </div>
+        </section>
+
+        <!-- Loading Section -->
+        <section class="loading-section hidden" id="loadingSection">
+            <div class="loading-card glass-card">
+                <div class="loading-spinner">
+                    <div class="spinner-banana">🍌</div>
+                </div>
+                <p class="loading-text">กำลังวิเคราะห์...</p>
+                <div class="loading-bar">
+                    <div class="loading-bar-fill" id="loadingBarFill"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section class="results-section hidden" id="resultsSection">
+            <div class="results-card glass-card">
+                <div class="results-header">
+                    <h3>ผลการวิเคราะห์</h3>
+                    <div class="results-confidence" id="resultsConfidence"></div>
+                </div>
+
+                <!-- Main Result -->
+                <div class="main-result" id="mainResult">
+                    <div class="result-emoji" id="resultEmoji">🍌</div>
+                    <h2 class="result-status" id="resultStatus">สุกแล้ว</h2>
+                    <p class="result-description" id="resultDescription"></p>
+                </div>
+
+                <!-- Color Analysis -->
+                <div class="color-analysis">
+                    <h4>การวิเคราะห์สี</h4>
+                    <div class="color-bars" id="colorBars"></div>
+                </div>
+
+                <!-- Ripeness Breakdown -->
+                <div class="ripeness-breakdown">
+                    <h4>ระดับความสุก</h4>
+                    <div class="breakdown-items" id="breakdownItems"></div>
+                </div>
+
+                <!-- Tips -->
+                <div class="tips-card" id="tipsCard">
+                    <div class="tips-icon">💡</div>
+                    <p class="tips-text" id="tipsText"></p>
+                </div>
+
+                <button class="btn btn-primary btn-try-again" onclick="resetAll()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10" />
+                        <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+                    </svg>
+                    ลองอีกครั้ง
+                </button>
+            </div>
+        </section>
+
+        <!-- History Section -->
+        <section class="history-section" id="historySection">
+            <div class="history-card glass-card">
+                <div class="history-header">
+                    <h3>📋 ประวัติการตรวจจับ</h3>
+                    <button class="btn btn-ghost btn-clear-history" onclick="clearHistory()" id="clearHistoryBtn"
+                        style="display:none;">
+                        ล้างประวัติ
+                    </button>
+                </div>
+                <div class="history-list" id="historyList">
+                    <div class="history-empty">
+                        <p>ยังไม่มีประวัติการตรวจจับ</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>🍌 Banana Ripeness Detector — สร้างด้วย ❤️ | DIGI Final Project</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
