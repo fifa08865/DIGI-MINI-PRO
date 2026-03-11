@@ -195,8 +195,8 @@ function analyzeImage() {
 
         setTimeout(() => {
             document.getElementById('loadingSection').classList.add('hidden');
-            // Check if banana was actually detected (threshold: 10% banana pixels)
-            if (result.bananaPixelRatio < 10) {
+            // Check if banana was actually detected using spatial analysis
+            if (!result.bananaDetected) {
                 document.getElementById('noBananaSection').classList.remove('hidden');
                 document.getElementById('noBananaSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
             } else {
@@ -238,20 +238,170 @@ function rgbToHsv(r, g, b) {
 }
 
 /**
+ * Check if a pixel is banana-colored (HSV-based)
+ * Banana colors: green (unripe), yellow-green, yellow (ripe), brown (overripe)
+ */
+function isBananaPixel(r, g, b) {
+    const hsv = rgbToHsv(r, g, b);
+    // Filter out background (too dark, too white, too desaturated)
+    if (hsv.s <= 20 || hsv.v <= 15 || hsv.v >= 97) return false;
+    // Banana hue range: 20-90 covers yellow-green to yellow to orange
+    // Plus green range for unripe: 60-140
+    // Plus brown for overripe: 15-45 with low brightness
+    const isYellowRange = hsv.h >= 25 && hsv.h <= 65 && hsv.s > 30 && hsv.v > 40;
+    const isGreenRange = hsv.h >= 60 && hsv.h <= 140 && hsv.s > 25 && hsv.v > 20;
+    const isBrownRange = hsv.h >= 15 && hsv.h <= 45 && hsv.s > 15 && hsv.v > 10 && hsv.v < 60;
+    return isYellowRange || isGreenRange || isBrownRange;
+}
+
+/**
+ * Detect if there's actually a banana in the image using spatial analysis
+ * Returns { detected: boolean, score: number, bananaGrid: 2D array }
+ */
+function detectBanana(imageData) {
+    const w = imageData.width;
+    const h = imageData.height;
+    const data = imageData.data;
+
+    // Step 1: Create a grid map of banana-colored pixels
+    // Use a coarser grid (4x4 blocks) for performance
+    const blockSize = 4;
+    const gridW = Math.ceil(w / blockSize);
+    const gridH = Math.ceil(h / blockSize);
+    const grid = Array.from({ length: gridH }, () => new Uint8Array(gridW));
+
+    // For each block, check if majority of pixels are banana-colored
+    for (let gy = 0; gy < gridH; gy++) {
+        for (let gx = 0; gx < gridW; gx++) {
+            let bananaCount = 0;
+            let totalCount = 0;
+            const startX = gx * blockSize;
+            const startY = gy * blockSize;
+            const endX = Math.min(startX + blockSize, w);
+            const endY = Math.min(startY + blockSize, h);
+
+            for (let y = startY; y < endY; y++) {
+                for (let x = startX; x < endX; x++) {
+                    const idx = (y * w + x) * 4;
+                    totalCount++;
+                    if (isBananaPixel(data[idx], data[idx + 1], data[idx + 2])) {
+                        bananaCount++;
+                    }
+                }
+            }
+            // Mark block as banana if >50% of its pixels are banana-colored
+            grid[gy][gx] = (bananaCount / totalCount > 0.5) ? 1 : 0;
+        }
+    }
+
+    // Step 2: Find connected components using flood-fill
+    const visited = Array.from({ length: gridH }, () => new Uint8Array(gridW));
+    const regions = [];
+
+    function floodFill(startGy, startGx) {
+        const region = { cells: [], minX: gridW, maxX: 0, minY: gridH, maxY: 0 };
+        const stack = [[startGy, startGx]];
+        visited[startGy][startGx] = 1;
+
+        while (stack.length > 0) {
+            const [cy, cx] = stack.pop();
+            region.cells.push([cy, cx]);
+            region.minX = Math.min(region.minX, cx);
+            region.maxX = Math.max(region.maxX, cx);
+            region.minY = Math.min(region.minY, cy);
+            region.maxY = Math.max(region.maxY, cy);
+
+            // 4-connected neighbors
+            const neighbors = [[cy-1,cx],[cy+1,cx],[cy,cx-1],[cy,cx+1]];
+            for (const [ny, nx] of neighbors) {
+                if (ny >= 0 && ny < gridH && nx >= 0 && nx < gridW &&
+                    !visited[ny][nx] && grid[ny][nx] === 1) {
+                    visited[ny][nx] = 1;
+                    stack.push([ny, nx]);
+                }
+            }
+        }
+        return region;
+    }
+
+    for (let gy = 0; gy < gridH; gy++) {
+        for (let gx = 0; gx < gridW; gx++) {
+            if (grid[gy][gx] === 1 && !visited[gy][gx]) {
+                regions.push(floodFill(gy, gx));
+            }
+        }
+    }
+
+    // Step 3: Analyze the largest region
+    if (regions.length === 0) {
+        return { detected: false, score: 0 };
+    }
+
+    regions.sort((a, b) => b.cells.length - a.cells.length);
+    const largest = regions[0];
+
+    const regionW = largest.maxX - largest.minX + 1;
+    const regionH = largest.maxY - largest.minY + 1;
+    const regionArea = regionW * regionH;
+    const regionPixels = largest.cells.length;
+    const totalGridCells = gridW * gridH;
+
+    // Solidity: how filled is the bounding box (bananas are ~0.4-0.8)
+    const solidity = regionPixels / Math.max(regionArea, 1);
+
+    // Aspect ratio: bananas are elongated (ratio > 1.3 typically)
+    const aspectRatio = Math.max(regionW, regionH) / Math.max(Math.min(regionW, regionH), 1);
+
+    // Region size relative to image
+    const sizeRatio = regionPixels / totalGridCells;
+
+    // Step 4: Calculate banana score (0-100)
+    let score = 0;
+
+    // Size: banana should occupy at least 5% of the image
+    if (sizeRatio >= 0.05) score += 25;
+    else if (sizeRatio >= 0.03) score += 15;
+
+    // Solidity: banana regions have moderate solidity (not too sparse, not a perfect rectangle)
+    if (solidity >= 0.3 && solidity <= 0.95) score += 25;
+    else if (solidity >= 0.2) score += 10;
+
+    // Aspect ratio: elongated shapes are more banana-like
+    if (aspectRatio >= 1.5 && aspectRatio <= 8) score += 25;
+    else if (aspectRatio >= 1.2) score += 15;
+    // Also accept round-ish banana bunches
+    else if (sizeRatio >= 0.15) score += 20;
+
+    // Color concentration: banana pixels should be concentrated, not scattered
+    // Check how many of the top 3 regions account for total banana pixels
+    const top3Size = regions.slice(0, 3).reduce((sum, r) => sum + r.cells.length, 0);
+    const totalBananaCells = regions.reduce((sum, r) => sum + r.cells.length, 0);
+    const concentration = top3Size / Math.max(totalBananaCells, 1);
+    if (concentration >= 0.7) score += 25;
+    else if (concentration >= 0.5) score += 15;
+
+    // Banana detected if score >= 50
+    return { detected: score >= 50, score };
+}
+
+/**
  * Analyze banana ripeness from image data using HSV color space
  */
 function analyzeBananaRipeness(imageData) {
     const data = imageData.data;
     const totalPixels = data.length / 4;
+    const w = imageData.width;
+    const h = imageData.height;
 
-    // Color counters
+    // Step 1: Detect if there's a banana in the image
+    const detection = detectBanana(imageData);
+
+    // Step 2: Color analysis for ripeness
     let greenPixels = 0;
     let yellowGreenPixels = 0;
     let yellowPixels = 0;
     let brownPixels = 0;
     let bananaPixels = 0;
-
-    // Dominant color tracking
     let avgH = 0, avgS = 0, avgV = 0;
 
     for (let i = 0; i < data.length; i += 4) {
@@ -259,37 +409,26 @@ function analyzeBananaRipeness(imageData) {
         const g = data[i + 1];
         const b = data[i + 2];
 
-        const hsv = rgbToHsv(r, g, b);
-
-        // Filter out background pixels (very dark, very bright white, very low saturation)
-        const isBananaCandidate = hsv.s > 15 && hsv.v > 15 && hsv.v < 97;
-
-        // Banana-like colors: green to yellow to brown range
-        const isBananaColor = (
-            (hsv.h >= 15 && hsv.h <= 160 && hsv.s > 20 && hsv.v > 20) ||
-            // Brown/overripe
-            (hsv.h >= 15 && hsv.h <= 45 && hsv.s > 15 && hsv.v > 10 && hsv.v < 60)
-        );
-
-        if (isBananaCandidate && isBananaColor) {
+        if (isBananaPixel(r, g, b)) {
+            const hsv = rgbToHsv(r, g, b);
             bananaPixels++;
             avgH += hsv.h;
             avgS += hsv.s;
             avgV += hsv.v;
 
-            // Green (Unripe): H 70-150, high saturation
-            if (hsv.h >= 70 && hsv.h <= 160 && hsv.s > 25) {
+            // Green (Unripe): H 70-140
+            if (hsv.h >= 70 && hsv.h <= 140 && hsv.s > 25) {
                 greenPixels++;
             }
-            // Yellow-Green (Ripening): H 50-75
+            // Yellow-Green (Ripening): H 50-70
             else if (hsv.h >= 48 && hsv.h < 70 && hsv.s > 25) {
                 yellowGreenPixels++;
             }
             // Yellow (Ripe): H 30-55, high saturation, high brightness
-            else if (hsv.h >= 30 && hsv.h < 55 && hsv.s > 35 && hsv.v > 50) {
+            else if (hsv.h >= 25 && hsv.h < 55 && hsv.s > 30 && hsv.v > 40) {
                 yellowPixels++;
             }
-            // Brown (Overripe): low brightness or low saturation in yellow-orange range
+            // Brown (Overripe): low brightness or low saturation
             else if (
                 (hsv.h >= 15 && hsv.h <= 50 && (hsv.v < 45 || hsv.s < 30)) ||
                 (hsv.h >= 15 && hsv.h <= 40 && hsv.v < 55)
@@ -299,28 +438,23 @@ function analyzeBananaRipeness(imageData) {
         }
     }
 
-    // Calculate averages
     if (bananaPixels > 0) {
         avgH /= bananaPixels;
         avgS /= bananaPixels;
         avgV /= bananaPixels;
     }
 
-    // Calculate percentages
     const total = Math.max(bananaPixels, 1);
     const greenPct = (greenPixels / total) * 100;
     const yellowGreenPct = (yellowGreenPixels / total) * 100;
     const yellowPct = (yellowPixels / total) * 100;
     const brownPct = (brownPixels / total) * 100;
 
-    // Determine ripeness level
+    // Ripeness determination
     let status, statusClass, emoji, description, tips;
     const bananaRatio = bananaPixels / totalPixels;
+    const confidence = Math.min(Math.round(detection.score + bananaRatio * 100), 95);
 
-    // Confidence based on how many banana-like pixels we found
-    const confidence = Math.min(Math.round(bananaRatio * 300), 95);
-
-    // Determine ripeness by finding the category with the highest percentage
     const categories = [
         { key: 'unripe',   pct: greenPct },
         { key: 'ripening', pct: yellowGreenPct },
@@ -362,6 +496,8 @@ function analyzeBananaRipeness(imageData) {
         description,
         tips,
         confidence,
+        bananaDetected: detection.detected,
+        bananaScore: detection.score,
         colors: {
             green: Math.round(greenPct),
             yellowGreen: Math.round(yellowGreenPct),
