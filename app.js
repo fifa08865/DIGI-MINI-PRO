@@ -149,9 +149,38 @@ function capturePhoto() {
     showPreview(imageSrc);
 }
 
+// ==================== ROBOFLOW API CONFIG ====================
+
+const ROBOFLOW_MODEL = 'banana-ripeness-classification';
+const ROBOFLOW_VERSION = '1';
+const ROBOFLOW_API_URL = `https://classify.roboflow.com/${ROBOFLOW_MODEL}/${ROBOFLOW_VERSION}`;
+
+function getApiKey() {
+    return localStorage.getItem('roboflowApiKey') || '';
+}
+
+function saveApiKey(key) {
+    localStorage.setItem('roboflowApiKey', key.trim());
+}
+
+function showApiKeyPrompt() {
+    const current = getApiKey();
+    const key = prompt(
+        '🔑 กรุณาใส่ Roboflow API Key\n\n' +
+        'สมัครฟรีที่: https://app.roboflow.com/settings/api\n\n' +
+        '(API Key จะถูกเก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น)',
+        current
+    );
+    if (key !== null && key.trim() !== '') {
+        saveApiKey(key);
+        return key.trim();
+    }
+    return null;
+}
+
 // ==================== IMAGE ANALYSIS ====================
 
-function analyzeImage() {
+async function analyzeImage() {
     const previewImage = document.getElementById('previewImage');
 
     document.getElementById('previewSection').classList.add('hidden');
@@ -166,36 +195,71 @@ function analyzeImage() {
         loadingFill.style.width = progress + '%';
     }, 200);
 
-    // Process image on canvas
-    const canvas = document.getElementById('analysisCanvas');
-    const ctx = canvas.getContext('2d');
+    // Check for API key
+    let apiKey = getApiKey();
+    if (!apiKey) {
+        clearInterval(loadingInterval);
+        document.getElementById('loadingSection').classList.add('hidden');
+        document.getElementById('previewSection').classList.remove('hidden');
+        apiKey = showApiKeyPrompt();
+        if (!apiKey) return;
+        // Restart analysis
+        analyzeImage();
+        return;
+    }
 
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-        // Scale down for performance
-        const maxSize = 300;
-        let w = img.width;
-        let h = img.height;
-        if (w > h) {
-            if (w > maxSize) { h = h * maxSize / w; w = maxSize; }
-        } else {
-            if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
+    try {
+        // Convert image to base64
+        const canvas = document.getElementById('analysisCanvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+
+        const base64Data = await new Promise((resolve) => {
+            img.onload = () => {
+                // Scale for API (max 640px)
+                const maxSize = 640;
+                let w = img.width;
+                let h = img.height;
+                if (w > h) {
+                    if (w > maxSize) { h = h * maxSize / w; w = maxSize; }
+                } else {
+                    if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
+                }
+                canvas.width = w;
+                canvas.height = h;
+                ctx.drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+            };
+            img.src = previewImage.src;
+        });
+
+        // Call Roboflow API
+        const response = await fetch(`${ROBOFLOW_API_URL}?api_key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: base64Data
+        });
+
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                localStorage.removeItem('roboflowApiKey');
+                throw new Error('API Key ไม่ถูกต้อง กรุณาใส่ใหม่');
+            }
+            throw new Error(`API Error: ${response.status}`);
         }
-        canvas.width = w;
-        canvas.height = h;
-        ctx.drawImage(img, 0, 0, w, h);
 
-        const imageData = ctx.getImageData(0, 0, w, h);
-        const result = analyzeBananaRipeness(imageData);
+        const apiResult = await response.json();
 
-        // Finish loading animation
+        // Parse Roboflow classification response
+        const result = parseRoboflowResult(apiResult);
+
+        // Finish loading
         clearInterval(loadingInterval);
         loadingFill.style.width = '100%';
 
         setTimeout(() => {
             document.getElementById('loadingSection').classList.add('hidden');
-            // Check if banana was actually detected using spatial analysis
             if (!result.bananaDetected) {
                 document.getElementById('noBananaSection').classList.remove('hidden');
                 document.getElementById('noBananaSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -203,8 +267,123 @@ function analyzeImage() {
                 displayResults(result, previewImage.src);
             }
         }, 500);
+
+    } catch (error) {
+        clearInterval(loadingInterval);
+        document.getElementById('loadingSection').classList.add('hidden');
+        document.getElementById('previewSection').classList.remove('hidden');
+        alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+        console.error('Analysis error:', error);
+    }
+}
+
+/**
+ * Parse Roboflow classification API response into display format
+ */
+function parseRoboflowResult(apiResult) {
+    // Roboflow classification response format:
+    // { predicted_classes: ["ripe"], predictions: [{ class: "ripe", confidence: 0.95 }, ...] }
+    // or { top: "ripe", confidence: 0.95, ... }
+
+    let predictions = {};
+    let topClass = '';
+    let topConfidence = 0;
+
+    if (apiResult.predictions && Array.isArray(apiResult.predictions)) {
+        for (const pred of apiResult.predictions) {
+            predictions[pred.class] = pred.confidence;
+            if (pred.confidence > topConfidence) {
+                topConfidence = pred.confidence;
+                topClass = pred.class;
+            }
+        }
+    } else if (apiResult.top) {
+        topClass = apiResult.top;
+        topConfidence = apiResult.confidence || 0;
+        // Try to get all class predictions
+        if (apiResult.predictions) {
+            for (const [cls, conf] of Object.entries(apiResult.predictions)) {
+                predictions[cls] = conf;
+            }
+        }
+    }
+
+    // Normalize class names (lowercase)
+    topClass = topClass.toLowerCase().trim();
+
+    // Map class names to our ripeness levels
+    const classMapping = {
+        'unripe': 'unripe',
+        'ripe': 'ripe',
+        'overripe': 'overripe',
+        'green': 'unripe',
+        'yellow': 'ripe',
+        'brown': 'overripe',
+        'freshripe': 'ripe',
+        'freshunripe': 'unripe',
+        'rotten': 'overripe',
+        'spotted': 'overripe',
     };
-    img.src = previewImage.src;
+
+    const RIPENESS_DATA = {
+        'unripe': {
+            status: 'ยังไม่สุก',
+            statusClass: 'unripe',
+            emoji: '🟢🍌',
+            description: 'กล้วยยังเขียวอยู่ ต้องรออีกหลายวันกว่าจะสุก',
+            tips: 'เก็บกล้วยไว้ในอุณหภูมิห้อง (25-28°C) เพื่อให้สุกเร็วขึ้น หรือใส่ถุงกระดาษปิดสนิทร่วมกับผลไม้ที่ปล่อยก๊าซเอทิลีน เช่น แอปเปิ้ล'
+        },
+        'ripe': {
+            status: 'สุกแล้ว',
+            statusClass: 'ripe',
+            emoji: '🟠🍌',
+            description: 'กล้วยสุกพอดี พร้อมรับประทาน! 🎉',
+            tips: 'กล้วยสุกพอดีอุดมไปด้วยโพแทสเซียม วิตามินบี 6 และเส้นใยอาหาร เหมาะสำหรับรับประทานเลยตอนนี้ หรือเก็บในตู้เย็นเพื่อยืดอายุอีก 2-3 วัน'
+        },
+        'overripe': {
+            status: 'สุกเกินไป',
+            statusClass: 'overripe',
+            emoji: '🟤🍌',
+            description: 'กล้วยสุกเกินไปแล้ว มีจุดน้ำตาล เหมาะทำขนม',
+            tips: 'กล้วยสุกเกินไปเหมาะสำหรับทำขนมปัง กล้วยทอด สมูทตี้ หรือไอศกรีมกล้วย! หากยังไม่ได้ใช้ ให้แกะเปลือกแล้วแช่แข็งเก็บไว้'
+        }
+    };
+
+    const mappedClass = classMapping[topClass] || 'ripe';
+    const info = RIPENESS_DATA[mappedClass];
+    const confidence = Math.round(topConfidence * 100);
+
+    // Build breakdown from predictions
+    const breakdown = { unripe: 0, ripening: 0, ripe: 0, overripe: 0 };
+    const colors = { green: 0, yellowGreen: 0, yellow: 0, brown: 0 };
+
+    for (const [cls, conf] of Object.entries(predictions)) {
+        const mapped = classMapping[cls.toLowerCase().trim()] || cls.toLowerCase().trim();
+        const pct = Math.round(conf * 100);
+        if (mapped === 'unripe') {
+            breakdown.unripe += pct;
+            colors.green += pct;
+        } else if (mapped === 'ripe') {
+            breakdown.ripe += pct;
+            colors.yellow += pct;
+        } else if (mapped === 'overripe') {
+            breakdown.overripe += pct;
+            colors.brown += pct;
+        }
+    }
+
+    return {
+        ...info,
+        confidence,
+        bananaDetected: topConfidence > 0.1,
+        bananaScore: confidence,
+        colors,
+        breakdown,
+        avgHue: 0,
+        avgSaturation: 0,
+        avgBrightness: 0,
+        bananaPixelRatio: confidence
+    };
 }
 
 // ==================== COLOR ANALYSIS ENGINE ====================
