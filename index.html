@@ -29,12 +29,9 @@
                     <p class="logo-subtitle">ตรวจจับความสุกของกล้วย</p>
                 </div>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div class="header-badge">
-                    <span class="badge-dot"></span>
-                    AI Powered
-                </div>
-                <button onclick="showApiKeyPrompt()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #fff; padding: 6px 10px; cursor: pointer; font-size: 16px; transition: all 0.3s;" title="ตั้งค่า API Key">⚙️</button>
+            <div class="header-badge">
+                <span class="badge-dot"></span>
+                AI Powered
             </div>
         </div>
     </header>
@@ -151,7 +148,7 @@
                 <div class="loading-spinner">
                     <div class="spinner-banana">🍌</div>
                 </div>
-                <p class="loading-text">กำลังวิเคราะห์...</p>
+                <p class="loading-text">กำลังวิเคราะห์ด้วย AI...</p>
                 <div class="loading-bar">
                     <div class="loading-bar-fill" id="loadingBarFill"></div>
                 </div>
@@ -163,7 +160,7 @@
             <div class="results-card glass-card" style="text-align: center; padding: 48px 24px;">
                 <div style="font-size: 72px; margin-bottom: 16px;">🚫🍌</div>
                 <h2 style="color: #ff6b6b; font-family: 'Prompt', sans-serif; font-weight: 700; font-size: 1.5rem; margin-bottom: 12px;">ไม่พบกล้วยในรูปภาพ</h2>
-                <p style="color: rgba(255,255,255,0.7); font-family: 'Prompt', sans-serif; font-size: 0.95rem; margin-bottom: 8px;">ระบบไม่สามารถตรวจพบกล้วยในรูปที่อัพโหลด</p>
+                <p class="no-banana-desc" style="color: rgba(255,255,255,0.7); font-family: 'Prompt', sans-serif; font-size: 0.95rem; margin-bottom: 8px;">ระบบไม่สามารถตรวจพบกล้วยในรูปที่อัพโหลด</p>
                 <p style="color: rgba(255,255,255,0.5); font-family: 'Prompt', sans-serif; font-size: 0.85rem; margin-bottom: 32px;">กรุณาอัพโหลดรูปภาพที่มีกล้วยอยู่ในรูปเพื่อวิเคราะห์ความสุก</p>
                 <button class="btn btn-primary btn-try-again" onclick="resetAll()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -242,6 +239,9 @@
         <p>🍌 Banana Ripeness Detector — สร้างด้วย ❤️ | DIGI Final Project</p>
     </footer>
 
+    <!-- TensorFlow.js + MobileNet for AI banana detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
     <script src="app.js"></script>
 </body>
 

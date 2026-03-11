@@ -149,34 +149,30 @@ function capturePhoto() {
     showPreview(imageSrc);
 }
 
-// ==================== ROBOFLOW API CONFIG ====================
+// ==================== TENSORFLOW.JS MOBILENET ====================
 
-const ROBOFLOW_MODEL = 'banana-ripeness-classification';
-const ROBOFLOW_VERSION = '1';
-const ROBOFLOW_API_URL = `https://classify.roboflow.com/${ROBOFLOW_MODEL}/${ROBOFLOW_VERSION}`;
+let mobilenetModel = null;
 
-function getApiKey() {
-    return localStorage.getItem('roboflowApiKey') || '';
-}
-
-function saveApiKey(key) {
-    localStorage.setItem('roboflowApiKey', key.trim());
-}
-
-function showApiKeyPrompt() {
-    const current = getApiKey();
-    const key = prompt(
-        '🔑 กรุณาใส่ Roboflow API Key\n\n' +
-        'สมัครฟรีที่: https://app.roboflow.com/settings/api\n\n' +
-        '(API Key จะถูกเก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น)',
-        current
-    );
-    if (key !== null && key.trim() !== '') {
-        saveApiKey(key);
-        return key.trim();
+/**
+ * Load MobileNet model (called once, cached)
+ */
+async function loadMobileNet() {
+    if (mobilenetModel) return mobilenetModel;
+    try {
+        mobilenetModel = await mobilenet.load({ version: 2, alpha: 1.0 });
+        console.log('✅ MobileNet loaded');
+        return mobilenetModel;
+    } catch (err) {
+        console.error('❌ Failed to load MobileNet:', err);
+        return null;
     }
-    return null;
 }
+
+// Preload model when page loads
+document.addEventListener('DOMContentLoaded', () => {
+    // Start loading in background (non-blocking)
+    loadMobileNet();
+});
 
 // ==================== IMAGE ANALYSIS ====================
 
@@ -190,69 +186,70 @@ async function analyzeImage() {
     const loadingFill = document.getElementById('loadingBarFill');
     let progress = 0;
     const loadingInterval = setInterval(() => {
-        progress += Math.random() * 15;
+        progress += Math.random() * 10;
         if (progress > 90) progress = 90;
         loadingFill.style.width = progress + '%';
-    }, 200);
-
-    // Check for API key
-    let apiKey = getApiKey();
-    if (!apiKey) {
-        clearInterval(loadingInterval);
-        document.getElementById('loadingSection').classList.add('hidden');
-        document.getElementById('previewSection').classList.remove('hidden');
-        apiKey = showApiKeyPrompt();
-        if (!apiKey) return;
-        // Restart analysis
-        analyzeImage();
-        return;
-    }
+    }, 300);
 
     try {
-        // Convert image to base64
-        const canvas = document.getElementById('analysisCanvas');
-        const ctx = canvas.getContext('2d');
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-
-        const base64Data = await new Promise((resolve) => {
-            img.onload = () => {
-                // Scale for API (max 640px)
-                const maxSize = 640;
-                let w = img.width;
-                let h = img.height;
-                if (w > h) {
-                    if (w > maxSize) { h = h * maxSize / w; w = maxSize; }
-                } else {
-                    if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
-                }
-                canvas.width = w;
-                canvas.height = h;
-                ctx.drawImage(img, 0, 0, w, h);
-                resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
-            };
-            img.src = previewImage.src;
-        });
-
-        // Call Roboflow API
-        const response = await fetch(`${ROBOFLOW_API_URL}?api_key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: base64Data
-        });
-
-        if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem('roboflowApiKey');
-                throw new Error('API Key ไม่ถูกต้อง กรุณาใส่ใหม่');
-            }
-            throw new Error(`API Error: ${response.status}`);
+        // Load MobileNet model
+        const model = await loadMobileNet();
+        if (!model) {
+            throw new Error('ไม่สามารถโหลด AI Model ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
         }
 
-        const apiResult = await response.json();
+        // Prepare image for classification
+        const imgElement = new Image();
+        imgElement.crossOrigin = 'anonymous';
 
-        // Parse Roboflow classification response
-        const result = parseRoboflowResult(apiResult);
+        await new Promise((resolve, reject) => {
+            imgElement.onload = resolve;
+            imgElement.onerror = reject;
+            imgElement.src = previewImage.src;
+        });
+
+        // Step 1: Use MobileNet to detect if it's a banana
+        const predictions = await model.classify(imgElement, 5);
+        console.log('MobileNet predictions:', predictions);
+
+        // Check if "banana" appears in top predictions
+        const bananaKeywords = ['banana'];
+        let isBanana = false;
+        let bananaConfidence = 0;
+
+        for (const pred of predictions) {
+            const className = pred.className.toLowerCase();
+            if (bananaKeywords.some(kw => className.includes(kw))) {
+                isBanana = true;
+                bananaConfidence = pred.probability;
+                break;
+            }
+        }
+
+        // Step 2: If banana detected, analyze ripeness using color analysis
+        const canvas = document.getElementById('analysisCanvas');
+        const ctx = canvas.getContext('2d');
+        const maxSize = 300;
+        let w = imgElement.width;
+        let h = imgElement.height;
+        if (w > h) {
+            if (w > maxSize) { h = h * maxSize / w; w = maxSize; }
+        } else {
+            if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(imgElement, 0, 0, w, h);
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const colorResult = analyzeBananaRipeness(imageData);
+
+        // Combine AI detection with color analysis
+        const result = {
+            ...colorResult,
+            bananaDetected: isBanana,
+            confidence: isBanana ? Math.max(Math.round(bananaConfidence * 100), colorResult.confidence) : 0,
+            aiPredictions: predictions.slice(0, 3).map(p => `${p.className} (${(p.probability * 100).toFixed(1)}%)`),
+        };
 
         // Finish loading
         clearInterval(loadingInterval);
@@ -261,6 +258,12 @@ async function analyzeImage() {
         setTimeout(() => {
             document.getElementById('loadingSection').classList.add('hidden');
             if (!result.bananaDetected) {
+                // Show what MobileNet thinks it is
+                const topGuess = predictions[0] ? predictions[0].className : 'ไม่ทราบ';
+                const noBananaDesc = document.querySelector('#noBananaSection .no-banana-desc');
+                if (noBananaDesc) {
+                    noBananaDesc.textContent = `AI ตรวจพบว่ารูปนี้คือ "${topGuess}" ไม่ใช่กล้วย`;
+                }
                 document.getElementById('noBananaSection').classList.remove('hidden');
                 document.getElementById('noBananaSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
             } else {
@@ -275,115 +278,6 @@ async function analyzeImage() {
         alert('❌ เกิดข้อผิดพลาด: ' + error.message);
         console.error('Analysis error:', error);
     }
-}
-
-/**
- * Parse Roboflow classification API response into display format
- */
-function parseRoboflowResult(apiResult) {
-    // Roboflow classification response format:
-    // { predicted_classes: ["ripe"], predictions: [{ class: "ripe", confidence: 0.95 }, ...] }
-    // or { top: "ripe", confidence: 0.95, ... }
-
-    let predictions = {};
-    let topClass = '';
-    let topConfidence = 0;
-
-    if (apiResult.predictions && Array.isArray(apiResult.predictions)) {
-        for (const pred of apiResult.predictions) {
-            predictions[pred.class] = pred.confidence;
-            if (pred.confidence > topConfidence) {
-                topConfidence = pred.confidence;
-                topClass = pred.class;
-            }
-        }
-    } else if (apiResult.top) {
-        topClass = apiResult.top;
-        topConfidence = apiResult.confidence || 0;
-        // Try to get all class predictions
-        if (apiResult.predictions) {
-            for (const [cls, conf] of Object.entries(apiResult.predictions)) {
-                predictions[cls] = conf;
-            }
-        }
-    }
-
-    // Normalize class names (lowercase)
-    topClass = topClass.toLowerCase().trim();
-
-    // Map class names to our ripeness levels
-    const classMapping = {
-        'unripe': 'unripe',
-        'ripe': 'ripe',
-        'overripe': 'overripe',
-        'green': 'unripe',
-        'yellow': 'ripe',
-        'brown': 'overripe',
-        'freshripe': 'ripe',
-        'freshunripe': 'unripe',
-        'rotten': 'overripe',
-        'spotted': 'overripe',
-    };
-
-    const RIPENESS_DATA = {
-        'unripe': {
-            status: 'ยังไม่สุก',
-            statusClass: 'unripe',
-            emoji: '🟢🍌',
-            description: 'กล้วยยังเขียวอยู่ ต้องรออีกหลายวันกว่าจะสุก',
-            tips: 'เก็บกล้วยไว้ในอุณหภูมิห้อง (25-28°C) เพื่อให้สุกเร็วขึ้น หรือใส่ถุงกระดาษปิดสนิทร่วมกับผลไม้ที่ปล่อยก๊าซเอทิลีน เช่น แอปเปิ้ล'
-        },
-        'ripe': {
-            status: 'สุกแล้ว',
-            statusClass: 'ripe',
-            emoji: '🟠🍌',
-            description: 'กล้วยสุกพอดี พร้อมรับประทาน! 🎉',
-            tips: 'กล้วยสุกพอดีอุดมไปด้วยโพแทสเซียม วิตามินบี 6 และเส้นใยอาหาร เหมาะสำหรับรับประทานเลยตอนนี้ หรือเก็บในตู้เย็นเพื่อยืดอายุอีก 2-3 วัน'
-        },
-        'overripe': {
-            status: 'สุกเกินไป',
-            statusClass: 'overripe',
-            emoji: '🟤🍌',
-            description: 'กล้วยสุกเกินไปแล้ว มีจุดน้ำตาล เหมาะทำขนม',
-            tips: 'กล้วยสุกเกินไปเหมาะสำหรับทำขนมปัง กล้วยทอด สมูทตี้ หรือไอศกรีมกล้วย! หากยังไม่ได้ใช้ ให้แกะเปลือกแล้วแช่แข็งเก็บไว้'
-        }
-    };
-
-    const mappedClass = classMapping[topClass] || 'ripe';
-    const info = RIPENESS_DATA[mappedClass];
-    const confidence = Math.round(topConfidence * 100);
-
-    // Build breakdown from predictions
-    const breakdown = { unripe: 0, ripening: 0, ripe: 0, overripe: 0 };
-    const colors = { green: 0, yellowGreen: 0, yellow: 0, brown: 0 };
-
-    for (const [cls, conf] of Object.entries(predictions)) {
-        const mapped = classMapping[cls.toLowerCase().trim()] || cls.toLowerCase().trim();
-        const pct = Math.round(conf * 100);
-        if (mapped === 'unripe') {
-            breakdown.unripe += pct;
-            colors.green += pct;
-        } else if (mapped === 'ripe') {
-            breakdown.ripe += pct;
-            colors.yellow += pct;
-        } else if (mapped === 'overripe') {
-            breakdown.overripe += pct;
-            colors.brown += pct;
-        }
-    }
-
-    return {
-        ...info,
-        confidence,
-        bananaDetected: topConfidence > 0.1,
-        bananaScore: confidence,
-        colors,
-        breakdown,
-        avgHue: 0,
-        avgSaturation: 0,
-        avgBrightness: 0,
-        bananaPixelRatio: confidence
-    };
 }
 
 // ==================== COLOR ANALYSIS ENGINE ====================
